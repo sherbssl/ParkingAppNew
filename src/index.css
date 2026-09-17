@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: "Plus Jakarta Sans", sans-serif;
+
+  --color-surface: #0b1326;
+  --color-surface-dim: #0b1326;
+  --color-surface-bright: #31394d;
+  --color-surface-container-lowest: #060e20;
+  --color-surface-container-low: #131b2e;
+  --color-surface-container: #171f33;
+  --color-surface-container-high: #222a3d;
+  --color-surface-container-highest: #2d3449;
+  --color-surface-charcoal: #1e293b;
+  --color-surface-elevated: #334155;
+  --color-on-surface: #dae2fd;
+  --color-on-surface-variant: #bfc7d2;
+  --color-text-primary: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-primary: #93ccff;
+  --color-on-primary: #003351;
+  --color-primary-container: #3198dc;
+  --color-primary-fixed-dim: #93ccff;
+  --color-route-blue: #2563eb;
+  --color-secondary: #4edea3;
+  --color-secondary-container: #00a572;
+  --color-secondary-fixed: #6ffbbe;
+  --color-tertiary: #ffb95f;
+  --color-tertiary-fixed-dim: #ffb95f;
+  --color-status-danger: #ef4444;
+}
+
+@layer base {
+  html, body {
+    width: 100vw;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    background-color: #0b1326;
+    color: #dae2fd;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Material Symbols font icon helper */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-headline-xl { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 36px; line-height: 44px; font-weight: 700; }
+.font-headline-xl-mobile { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 28px; line-height: 34px; font-weight: 700; }
+.font-headline-lg { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 24px; line-height: 32px; font-weight: 600; }
+.font-headline-md { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 20px; line-height: 28px; font-weight: 600; }
+.font-headline-sm { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 16px; line-height: 24px; font-weight: 600; }
+.font-numeric-metric { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; line-height: 26px; letter-spacing: -0.02em; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.font-body-lg { font-family: 'Inter', sans-serif; font-size: 16px; line-height: 24px; }
+.font-body-md { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 20px; }
+.font-body-sm { font-family: 'Inter', sans-serif; font-size: 12px; line-height: 16px; }
+
+.font-label-lg { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 20px; font-weight: 600; }
+.font-label-md { font-family: 'Inter', sans-serif; font-size: 12px; line-height: 16px; font-weight: 600; }
+.font-label-sm { font-family: 'Inter', sans-serif; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.04em; }
+
+/* Custom scrollbar hiding */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+

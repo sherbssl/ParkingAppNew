@@ -1,0 +1,6 @@
+{
+  "name": "ParkPulse",
+  "description": "Smart urban parking and navigation intelligence app with live rates, optimal lot discovery, and URA sync.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
