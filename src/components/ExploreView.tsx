@@ -2,7 +2,13 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ParkingSpot, LotCategory } from '../types';
 import { POPULAR_DESTINATIONS, DestinationItem } from '../data/mockParkingData';
 import { calculateDistanceMeters } from '../data/singaporeCarparkDatabase';
-import { fetchLtaCarparkAvailability, LtaCarparkRecord } from '../services/ltaService';
+import { fetchAndMapCarparkAvailability } from '../services/parkingDataService';
+import {
+  fetchAndIngestDataGovCarparks,
+  mergeIngestedSpots,
+  DATA_GOV_DATASETS,
+  DataGovIngestionResult,
+} from '../services/dataGovIngestionService';
 
 interface ExploreViewProps {
   spots: ParkingSpot[];
@@ -56,6 +62,13 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   const [showLtaKeyModal, setShowLtaKeyModal] = useState<boolean>(false);
   const [ltaLotCount, setLtaLotCount] = useState<number>(0);
 
+  // Data.gov.sg Ingestion State
+  const [dataGovStatus, setDataGovStatus] = useState<'idle' | 'ingesting' | 'ingested' | 'error'>('idle');
+  const [dataGovResult, setDataGovResult] = useState<DataGovIngestionResult | null>(null);
+  const [showDataGovModal, setShowDataGovModal] = useState<boolean>(false);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string>(DATA_GOV_DATASETS.HDB_CARPARK_INFO);
+  const [dataGovIngestedCount, setDataGovIngestedCount] = useState<number>(0);
+
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -73,37 +86,14 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   const triggerLtaSync = async (accountKeyToUse?: string) => {
     setLtaSyncStatus('syncing');
     try {
-      const result = await fetchLtaCarparkAvailability(accountKeyToUse || customLtaKey);
-      if (result.success && result.value && result.value.length > 0) {
-        setLtaSyncStatus('live');
-        setLtaLotCount(result.value.length);
+      const result = await fetchAndMapCarparkAvailability(spots, accountKeyToUse || customLtaKey);
+      if (result.success && result.rawRecords && result.rawRecords.length > 0) {
+        setLtaSyncStatus(result.source === 'lta_datamall' ? 'live' : 'fallback');
+        setLtaLotCount(result.totalLiveCarparks);
         setLtaLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
-        // Map LTA data into our spots
-        setSpots((prev) =>
-          prev.map((spot) => {
-            const match = result.value.find((lta: LtaCarparkRecord) => {
-              if (lta.Development && spot.name.toLowerCase().includes(lta.Development.toLowerCase())) return true;
-              if (lta.Development && lta.Development.toLowerCase().includes(spot.shortName.toLowerCase())) return true;
-              return false;
-            });
-
-            if (match && match.AvailableLots !== undefined) {
-              const lots = Number(match.AvailableLots);
-              let status: 'Plentiful' | 'Filling Fast' | 'Limited' | 'Full' = 'Plentiful';
-              if (lots === 0) status = 'Full';
-              else if (lots < 10) status = 'Limited';
-              else if (lots < 30) status = 'Filling Fast';
-
-              return {
-                ...spot,
-                availableLots: lots,
-                lotStatus: status,
-              };
-            }
-            return spot;
-          })
-        );
+        // Update spots with CarParkID mapped availability
+        setSpots(result.updatedSpots);
       } else {
         setLtaSyncStatus('fallback');
         setLtaLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
@@ -113,9 +103,36 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     }
   };
 
-  // Trigger LTA fetch on mount & periodically
+  // Function to fetch and normalize static carpark location metadata from data.gov.sg
+  const triggerDataGovIngestion = async (datasetIdToUse?: string) => {
+    setDataGovStatus('ingesting');
+    const dataset = datasetIdToUse || selectedDatasetId;
+    try {
+      const result = await fetchAndIngestDataGovCarparks({
+        datasetId: dataset,
+        limit: 50,
+        referenceLat: targetDestination.lat,
+        referenceLng: targetDestination.lng,
+      });
+
+      setDataGovResult(result);
+      if (result.success && result.spots.length > 0) {
+        setSpots((prev) => mergeIngestedSpots(prev, result.spots));
+        setDataGovIngestedCount(result.totalFetched);
+        setDataGovStatus('ingested');
+      } else {
+        setDataGovStatus('error');
+      }
+    } catch (err) {
+      console.warn('Data.gov.sg ingestion error:', err);
+      setDataGovStatus('error');
+    }
+  };
+
+  // Trigger LTA fetch and Data.gov.sg ingestion on mount
   useEffect(() => {
     triggerLtaSync();
+    triggerDataGovIngestion();
     const interval = setInterval(() => {
       triggerLtaSync();
     }, 30000);
@@ -610,29 +627,55 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               </button>
             </div>
 
-            {/* LTA DataMall Connection Status Pill */}
-            <button
-              onClick={() => setShowLtaKeyModal(true)}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#0b1326] border border-white/5 text-[10px] font-['Inter'] font-semibold hover:border-[#4edea3]/40 transition-colors"
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  ltaSyncStatus === 'live'
-                    ? 'bg-[#4edea3] animate-pulse'
+            {/* Government Data Sources: LTA DataMall & Data.gov.sg Ingestion Pills */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Data.gov.sg Ingestion Status Pill */}
+              <button
+                onClick={() => setShowDataGovModal(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#0b1326] border border-white/5 text-[10px] font-['Inter'] font-semibold hover:border-[#93ccff]/40 transition-colors"
+                title="Data.gov.sg Carpark Metadata Ingestion"
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    dataGovStatus === 'ingested'
+                      ? 'bg-[#93ccff]'
+                      : dataGovStatus === 'ingesting'
+                      ? 'bg-amber-400 animate-spin'
+                      : 'bg-[#94a3b8]'
+                  }`}
+                ></span>
+                <span className="text-[#dae2fd]">
+                  {dataGovStatus === 'ingesting'
+                    ? 'Ingesting...'
+                    : `Data.gov.sg (${dataGovIngestedCount || 12})`}
+                </span>
+                <span className="material-symbols-outlined text-[12px] text-[#93ccff]">cloud_download</span>
+              </button>
+
+              {/* LTA DataMall Connection Status Pill */}
+              <button
+                onClick={() => setShowLtaKeyModal(true)}
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#0b1326] border border-white/5 text-[10px] font-['Inter'] font-semibold hover:border-[#4edea3]/40 transition-colors"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    ltaSyncStatus === 'live'
+                      ? 'bg-[#4edea3] animate-pulse'
+                      : ltaSyncStatus === 'syncing'
+                      ? 'bg-amber-400 animate-spin'
+                      : 'bg-[#93ccff]'
+                  }`}
+                ></span>
+                <span className="text-[#4edea3]">
+                  {ltaSyncStatus === 'live'
+                    ? `LTA Live (${ltaLotCount || 'Active'})`
                     : ltaSyncStatus === 'syncing'
-                    ? 'bg-amber-400 animate-spin'
-                    : 'bg-[#93ccff]'
-                }`}
-              ></span>
-              <span className="text-[#4edea3]">
-                {ltaSyncStatus === 'live'
-                  ? `LTA DataMall Live (${ltaLotCount || 'Active'})`
-                  : ltaSyncStatus === 'syncing'
-                  ? 'Connecting LTA...'
-                  : 'LTA DataMall Synced'}
-              </span>
-              <span className="material-symbols-outlined text-[12px] text-[#94a3b8]">settings</span>
-            </button>
+                    ? 'Connecting LTA...'
+                    : 'LTA Synced'}
+                </span>
+                <span className="material-symbols-outlined text-[12px] text-[#94a3b8]">settings</span>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -1069,6 +1112,121 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               </button>
               <button
                 onClick={() => setShowLtaKeyModal(false)}
+                className="h-9 px-4 rounded-xl bg-[#334155] text-white text-xs font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Data.gov.sg Ingestion Inspector Modal */}
+      {showDataGovModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#1e293b] border border-white/10 rounded-2xl p-5 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#93ccff] text-[20px]">cloud_sync</span>
+                <h3 className="text-sm font-bold font-['Plus_Jakarta_Sans'] text-white">
+                  Data.gov.sg Carpark Metadata Ingestion
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowDataGovModal(false)}
+                className="w-7 h-7 rounded-full bg-white/5 flex items-center justify-center text-[#94a3b8] hover:text-white"
+              >
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </div>
+
+            <p className="text-[#94a3b8] leading-relaxed">
+              Fetches and normalizes official static carpark metadata from Singapore data.gov.sg datasets. Converts SVY21 Easting/Northing coordinates into WGS84 geographic coordinates and maps official HDB/URA tariff models into the internal <code className="text-[#93ccff]">ParkingSpot</code> structure.
+            </p>
+
+            {/* Ingestion Status Box */}
+            <div className="p-3.5 rounded-xl bg-[#131b2e] border border-white/5 flex flex-col gap-2 font-mono text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-[#94a3b8]">Ingestion State:</span>
+                <span className={`font-bold ${dataGovStatus === 'ingested' ? 'text-[#4edea3]' : dataGovStatus === 'ingesting' ? 'text-amber-300' : 'text-white'}`}>
+                  {dataGovStatus === 'ingested' ? 'Successfully Ingested' : dataGovStatus === 'ingesting' ? 'Ingesting from Datastore...' : 'Ready'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#94a3b8]">Active Source:</span>
+                <span className="text-[#93ccff]">
+                  {dataGovResult?.source || 'data_gov_live / static_seed'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#94a3b8]">Dataset Resource ID:</span>
+                <span className="text-amber-300 font-bold truncate max-w-[240px]">
+                  {selectedDatasetId}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#94a3b8]">Ingested Carparks:</span>
+                <span className="text-white font-bold">{dataGovIngestedCount || 12} locations normalized</span>
+              </div>
+            </div>
+
+            {/* Select Dataset to Ingest */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-[#94a3b8]">
+                Select Singapore data.gov.sg Dataset
+              </label>
+              <select
+                value={selectedDatasetId}
+                onChange={(e) => setSelectedDatasetId(e.target.value)}
+                className="bg-[#131b2e] border border-white/10 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-[#93ccff]"
+              >
+                <option value={DATA_GOV_DATASETS.HDB_CARPARK_INFO}>
+                  d_e36b7c1dfe770ef8ebcd3ace81eb9402 (HDB Carpark Info &amp; Coordinates)
+                </option>
+                <option value={DATA_GOV_DATASETS.URA_CARPARK_LIST}>
+                  d_d959102fa76d58f2de276bfbb7e8f68e (URA Carpark List &amp; Rates)
+                </option>
+                <option value={DATA_GOV_DATASETS.GOV_CARPARKS_EAST}>
+                  d_9bf8620ecfdc8a5f8f77e3f02160af5c (East Zone Carparks)
+                </option>
+                <option value={DATA_GOV_DATASETS.GOV_CARPARKS_CENTRAL}>
+                  d_3b0c377cde41041c93f893d0a92e9fe7 (Central Zone Carparks)
+                </option>
+                <option value={DATA_GOV_DATASETS.GOV_CARPARKS_WEST}>
+                  d_ca933a644e55d34fe21f28b8052fac63 (West Zone Carparks)
+                </option>
+                <option value={DATA_GOV_DATASETS.GOV_CARPARKS_NORTH}>
+                  d_23f946fa557947f93a8043bbef41dd09 (North Zone Carparks)
+                </option>
+              </select>
+            </div>
+
+            {/* Normalization Mapping Schema Card */}
+            <div className="p-3 rounded-xl bg-[#0b1326] border border-white/5 flex flex-col gap-1.5 text-[11px] text-[#94a3b8]">
+              <div className="text-[10px] font-bold uppercase text-[#93ccff]">Normalization Pipeline</div>
+              <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                <div>• SVY21 x/y → WGS84 Lat/Lng</div>
+                <div>• car_park_type → Street vs Building</div>
+                <div>• gantry_height → maxHeightM</div>
+                <div>• type_of_parking → EPS vs Parking.sg</div>
+                <div>• night_parking → $5.00 Cap logic</div>
+                <div>• free_parking → Weekend free exemptions</div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                disabled={dataGovStatus === 'ingesting'}
+                onClick={() => {
+                  triggerDataGovIngestion(selectedDatasetId);
+                }}
+                className="flex-1 h-9 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold text-xs active:scale-95 transition-all shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[16px]">download</span>
+                <span>{dataGovStatus === 'ingesting' ? 'Ingesting Records...' : 'Ingest Dataset Now'}</span>
+              </button>
+              <button
+                onClick={() => setShowDataGovModal(false)}
                 className="h-9 px-4 rounded-xl bg-[#334155] text-white text-xs font-medium"
               >
                 Close
